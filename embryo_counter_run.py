@@ -12,7 +12,7 @@ import copy
 from pathlib import Path
 import pickle
 import pdb
-# pdb.set_trace()
+pdb.set_trace()
 from embryo_counter import *
 import logging
 
@@ -30,7 +30,9 @@ def _init_logger(log_out):
 def compose_process_steps(prm):
     if prm['mode'] == 'predict':
         # prm['process_steps'] = ['segment', 'extract_region_properties', 'predict_with_svm', 'report']
-        prm['process_steps'] = ['segment', 'extract_region_properties', 'filter_regions', 'report']
+        prm['process_steps'] = ['segment', 'extract_region_properties', 'filter_regions', 'relabel_hierarchically', 'report']
+        # prm['process_steps'] = ['extract_region_properties', 'filter_regions', 'relabel_hierarchically', 'report']
+        # prm['process_steps'] = ['cluster_regions', 'extract_region_properties', 'filter_regions', 'report']
     elif prm['mode'] == 'validate':
         prm['process_steps'] = ['validate', 'report']
     elif prm['mode'] == 'train':
@@ -85,7 +87,7 @@ def _init_parms(arg):
     prm['res_XY'] = 0.454 # keep correct !
     prm['major_axis_length_standard_micron'] = 22.7 # system parameter 
     prm['axis_length_ratio_standard'] = 0.58 # system parameter :
-    prm['factor_tolerate_gap_between_cells'] = 1
+    prm['factor_tolerate_gap_between_cells'] = 0.8 # > 1 more region fragmentation
     prm['major_axis_variance_micron'] = 5 
     
     #----------------------------------------
@@ -95,6 +97,7 @@ def _init_parms(arg):
     
     prm['p_img2D'] = prm['log_folder'] / '00_raw.tif'
     prm['p_frangi_img2D'] = prm['log_folder'] / "01_frangi.tif"
+    prm['p_frangi_img2D_embryo'] = prm['log_folder'] / "01_frangi_embryo.tif"
     prm['p_img_regions'] = prm['log_folder'] / '08_watershed_filtered.tif'
     
     prm['save_img'] = True
@@ -104,13 +107,13 @@ def _init_parms(arg):
     prm['filter_arg']['frangi'] = {
                         'sigmas': [3],   #boundary 6pixels across
                         'scale_step': 1,
-                        'alpha': 0.01,
-                        'beta': 9999,
+                        'alpha': 0.01,  #NA for 2D images
+                        'beta': 9999, 
                         'gamma': 0.05,  #0.005
                         'black_ridges': True,
                         'mode':'reflect'}
     prm['filter_arg']['frangi2'] = copy.deepcopy(prm['filter_arg']['frangi'] )
-    prm['filter_arg']['frangi2'].update({'sigmas': [11], 'black_ridges': False})
+    prm['filter_arg']['frangi2'].update({'sigmas': [7], 'black_ridges': False, 'beta':1})  # 11
     prm['filter_arg']['thresholds'] = {
                         'otsu_factor' : 0.3,
                         'seed_extension_factor': 8
@@ -121,7 +124,7 @@ def _init_parms(arg):
                         'size_filter_min' : 100
                         }
 
-    prm['extract_properties'] = ['label', 'centroid', 'area', 'minor_axis_length', 'major_axis_length', 'eccentricity', 'min_intensity', 'max_intensity', 'mean_intensity', 'feret_diameter_max']
+    prm['extract_properties'] = ['label', 'centroid', 'area', 'minor_axis_length', 'major_axis_length', 'eccentricity', 'min_intensity', 'max_intensity', 'mean_intensity', 'feret_diameter_max','bbox']
 
     prm['clf']={}
     prm['clf']['p_svm_train'] = prm['log_folder'] / 'svm.pkl'
@@ -147,11 +150,18 @@ def _init_parms(arg):
 
 def set_file_paths(prm, file_i):
     prm['input_img'] = file_i
-    prm['output_folder_file'] = prm['output_folder'] / file_i.stem 
+    prm['output_folder_file'] = prm['output_folder'] / file_i.stem.replace(" ", "")
     prm['p_df_regions_out'] = prm['output_folder_file'] /'regions.csv'
     prm['p_df_regions_in'] = prm['p_df_regions_out']
 
     prm['output_folder_file'].mkdir(parents=True,exist_ok=True)
+
+    prm['log_folder'] = prm['output_folder_file']
+
+    prm['p_img2D'] = prm['log_folder'] / '00_raw.tif'
+    prm['p_frangi_img2D'] = prm['log_folder'] / "01_frangi.tif"
+    prm['p_frangi_img2D_embryo'] = prm['log_folder'] / "01_frangi_embryo.tif"
+    prm['p_img_regions'] = prm['log_folder'] / '08_watershed_filtered.tif'
 
     return
 
@@ -170,6 +180,13 @@ if __name__ == '__main__':
         for process_step in prm['process_steps']:
             if process_step == 'segment':
                 d_img = segment_embryos(prm)
+                continue
+
+            if process_step == 'cluster_regions':
+                img_regions = d_img.get('img_regions', TiffFile(prm['p_img_regions']).asarray())
+                d_img['img_regions_preCluster'] = img_regions # Backup old region data for reference
+                d_img['img_regions'] = cluster_regions(img_regions)
+                continue
 
             if process_step == 'extract_region_properties':
                 df_regions = extract_region_properties(
@@ -183,35 +200,34 @@ if __name__ == '__main__':
                 df_regions['lbl_pred'] = 'P'
                 displot_2D(prm, df_regions, x=prm['extract_properties'][3], y=prm['extract_properties'][4], hue='type')
 
+            df_regions = pd.read_csv(prm['p_df_regions_in']) if df_regions is None else df_regions
             if process_step == 'add_PCA_coef':
                 add_PCA_coef(prm, df_regions)
                 displot_2D(prm, df_regions, x='PCA1', y='PCA2', hue='type')
 
-            if process_step == 'validate':
-                df_regions = pd.read_csv(prm['p_df_regions_in'])
+            elif process_step == 'validate':
                 # df_regions = copy.deepcopy(df_regions[df_regions.type == 'RES'])
                 df_regions = perform_validation(prm, df_regions, img_regions=d_img.get('img_regions'))
                 
-            if process_step ==  'train_svm':
-                df_regions = pd.read_csv(prm['p_df_regions_in']) if df_regions is None else df_regions
+            elif process_step ==  'train_svm':
                 clf = train_svm(prm, df_regions)
                 with open(prm['clf']['p_svm_train'], 'wb') as f:
                     pickle.dump(clf, f)
                     logging.info(f"____> trained svm written to {str(f)}")
 
-            if process_step == 'predict_with_svm':
-                df_regions = pd.read_csv(prm['p_df_regions_in']) if df_regions is None else df_regions
+            elif process_step == 'predict_with_svm':
                 df_regions.lbl_pred_svm = np.NaN
                 if clf is None:
                     clf = pickle.load(open( prm['clf']['p_svm_predict'], "rb" ))
                 df_regions = predict_with_svm(prm, clf, df_regions, d_img)
 
-            if process_step == 'filter_regions':
-                df_regions = pd.read_csv(prm['p_df_regions_in']) if df_regions is None else df_regions
+            elif process_step == 'filter_regions':
                 df_regions = filter_regions(prm, df_regions)
 
-            if process_step == 'report':
-                df_regions = pd.read_csv(prm['p_df_regions_in']) if df_regions is None else df_regions
+            elif process_step == 'relabel_hierarchically':
+                df_regions = hierarchical_labeling(prm, df_regions, d_img)
+
+            elif process_step == 'report':
                 report_count(prm, df_regions, d_img)
 
             if df_regions is not None:

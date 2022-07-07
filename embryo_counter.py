@@ -35,6 +35,7 @@ from skimage.morphology import (remove_small_objects,
 # https://scikit-image.org/docs/dev/api/skimage.measure.html#skimage.measure.regionprops
 from skimage.measure import label, regionprops, regionprops_table
 from skimage.color import label2rgb
+from skimage.draw import line
 
 from skimage.segmentation import mark_boundaries
 from scipy.ndimage.morphology import distance_transform_edt 
@@ -137,7 +138,7 @@ def _segment_regions(prm, bin_img):
     logging.info(f"__________>{len(filter_labels)} labels are filtered out using a size filter")
     ws_img_filtered = np.where(np.isin(ws_img, filter_labels), 0, ws_img)
     if prm['save_img']:
-        imsave(str(prm['log_folder'] / '08_watershed_filtered.tif'), ws_img)
+        imsave(str(prm['log_folder'] / '08_watershed_filtered.tif'), ws_img_filtered)
 
 
     return ws_img_filtered
@@ -357,6 +358,78 @@ def perform_validation(prm, df_regions=None, img_regions=None):
     return pd.concat([df_regions, df_regions_val], ignore_index=True)
 
 
+
+
+def cluster_regions(img_regions):
+
+    logging.info(f"> Clustering regions-----------------------------------------------------------")
+
+    img_regions_clustered = label(img_regions > 0, background=0)
+
+    logging.info('__________>{0} regions remain after clustering'.format(np.unique(img_regions_clustered).shape[0] - 1 )) 
+
+    return img_regions_clustered
+
+
+def hierarchical_labeling(prm, df_regions, d_img):
+
+    logging.info(f"> Perform hierarchical labeling-----------------------------------------------------------")
+
+    def enrich_final_lbl(mode='cluster_override'):
+        for label2_i, df_i in df_regions.groupby('label2'):
+            if df_i.lbl_pred2.iat[0] == 'P':
+                df_regions.loc[df_i.index[0], 'lbl_pred'] = 'P'
+                if len(df_i.index) > 1:
+                    df_regions.loc[df_i.index[1:], 'lbl_pred'] = 'N'# only 1 'sub'region is marked P, the others not
+            else:
+                if mode=='cluster_override':
+                    if np.all(df_i.lbl_pred1 == 'P'):
+                        df_regions.loc[df_i.index, 'lbl_pred'] = 'P'
+                    else:
+                        df_regions.loc[df_i.index, 'lbl_pred'] = 'N'
+                else:
+                    df_regions.loc[df_i.index, 'lbl_pred'] = np.array(df_i.lbl_pred1)
+        return
+        
+    img_regions_clustered = label(d_img['img_regions'] > 0, background=0)
+    df_regions_clustered = extract_region_properties(prm, d_img={'img_regions' : img_regions_clustered}, l_prop=[['label', 'centroid', 'area', 'minor_axis_length', 'major_axis_length', 'bbox']])
+    filter_regions(prm, df_regions_clustered)
+    reg_coord = np.array(df_regions[['centroid-0', 'centroid-1']].T.astype(int))
+    df_regions['label_2'] = img_regions_clustered[tuple(reg_coord)].astype(int)
+    df_regions = df_regions.merge(df_regions_clustered[['label', 'lbl_pred', 'bbox-0', 'bbox-1', 'bbox-2', 'bbox-3']], how='left', left_on='label_2', right_on='label', suffixes=('1', '2'))
+    df_regions.drop('label_2', axis=1, inplace=True)
+    enrich_final_lbl(mode=None)
+    return df_regions
+
+
+def filter_regions(prm, df_regions):
+
+    logging.info(f"> Filter regions----------------------------------------------------------")
+
+    filter1 = df_regions.major_axis_length.between(*prm['filter_region']['major_axis_length_interval'])
+    filter2 = df_regions.minor_axis_length.between(*prm['filter_region']['minor_axis_length_interval'])
+    filter3 = df_regions.area.between(*prm['filter_region']['area_interval'])
+    cond = (filter1 | filter2) & filter3
+    if 'type' in df_regions:
+        cond = (df_regions.type=='RES') & cond
+        
+    logging.info(f"___> {sum(~cond)} regions are filtered based on axis characteristics and area,leaving {sum(cond)} regions")
+
+    df_regions.loc[~cond, 'lbl_pred'] = 'N'
+    df_regions.loc[cond, 'lbl_pred'] = 'P'
+
+    return df_regions
+
+def draw_bbox_around_cluster(marker_value, img, bbox):
+    min_row, min_col, max_row, max_col = [int(i) for i in bbox]
+    img[line(min_row, min_col, max_row, min_col )] = marker_value 
+    img[line(max_row, min_col, max_row, max_col )] = marker_value 
+    img[line(max_row, max_col , min_row, max_col )] = marker_value 
+    img[line(min_row, max_col, min_row, min_col )] = marker_value 
+
+    return
+
+
 def report_count(prm, df_regions, d_img):
 
     logging.info(f"> Report count-----------------------------------------------------------")
@@ -377,7 +450,7 @@ def report_count(prm, df_regions, d_img):
                 marker_value = 0 if row_i['lbl_real']== 'N' else anchor_value
             else:
                 marker_value = anchor_value
-            img2D_vis [rr, cc] = marker_value
+            img2D_vis[rr, cc] = marker_value * 2
 
 
         cond_FN1 = df_regions.type == 'VAL'
@@ -385,7 +458,27 @@ def report_count(prm, df_regions, d_img):
             cond_FN2 = df_regions.lbl_real == 'P'
             for ix_row, row_i in df_regions[cond_FN1 & cond_FN2].iterrows():
                 rr, cc = circle_perimeter(int(row_i['centroid-0']), int(row_i['centroid-1']),radius=10)
-                img2D_vis [rr, cc] = anchor_value * 2
+                img2D_vis[rr, cc] = anchor_value * 2
+
+
+        # img_regions = d_img.get('img_regions_preCluster')
+        # if img_regions is not None:
+        #     df_regions_preCluster = extract_region_properties(prm, d_img={'img_regions' : img_regions})
+        #     for ix_row, row_i in df_regions_preCluster.iterrows():
+        #         rr, cc = circle_perimeter(int(row_i['centroid-0']), int(row_i['centroid-1']),radius=1) 
+        #         img2D_vis[rr, cc] = anchor_value
+
+        cond = df_regions[lbl_pred] == 'N'
+        for ix_row, row_i in df_regions[cond_RES & cond].iterrows():
+            rr, cc = circle_perimeter(int(row_i['centroid-0']), int(row_i['centroid-1']),radius=1)
+            marker_value = anchor_value
+            img2D_vis[rr, cc] = marker_value
+
+        if 'label2' in df_regions and 'bbox-02' in df_regions:
+            for label2_i, df_i in df_regions.groupby('label2'):
+                if 'P' in list(df_i.lbl_pred) and 'N' in list(df_i.lbl_pred):
+                    bbox = (df_i['bbox-02'].iat[0], df_i['bbox-12'].iat[0], df_i['bbox-22'].iat[0], df_i['bbox-32'].iat[0])
+                    draw_bbox_around_cluster(anchor_value, img2D_vis, bbox)
 
         return img2D_vis
 
@@ -414,23 +507,4 @@ def report_count(prm, df_regions, d_img):
 
     return
         
-
-
-def filter_regions(prm, df_regions):
-
-    logging.info(f"> Filter regions----------------------------------------------------------")
-
-    cond_RES = df_regions.type=='RES'
-    filter1 = df_regions.major_axis_length.between(*prm['filter_region']['major_axis_length_interval'])
-    filter2 = df_regions.minor_axis_length.between(*prm['filter_region']['minor_axis_length_interval'])
-    filter3 = df_regions.area.between(*prm['filter_region']['area_interval'])
-    cond = cond_RES & (filter1 | filter2) & filter3
-    logging.info(f"___> {sum(~cond)} regions are filtered based on axis characteristics and area,leaving {sum(cond)} regions")
-
-    df_regions.loc[~cond, 'lbl_pred'] = 'N'
-    df_regions.loc[cond, 'lbl_pred'] = 'P'
-
-    return df_regions
-
-
 
