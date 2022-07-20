@@ -1,0 +1,29 @@
+==== CPA 3.0 properties file for example dataset ====
+# ==== Database Info ====
+image_csv_file   =  /home/wth/Downloads/testinfra/ISOLATED/labkit_Roberto/CellProfilerAnalyst/image.csv
+object_csv_file  =  /home/wth/Downloads/testinfra/ISOLATED/labkit_Roberto/CellProfilerAnalyst/object.csv
+db_type     = sqlite
+# ==== Table info ====
+image_table  = ImageTable
+object_table = ObjectTable
+# ==== Column info ====
+image_id   = ImageNumber
+object_id  = label1
+plate_id   = plate
+well_id    = well
+cell_x_loc = centroid1
+cell_y_loc = centroid0
+# ==== Image access info ====
+image_url_prepend =
+# ==== Image Path and Filename Columns ====
+image_path_cols = ImagePathName
+image_file_cols = ImageFileName
+image_names = vis
+image_channel_colors = gray
+# ==== Global Meta data ====
+object_name = cell, cells
+plate_type  = 96
+# ==== Classify ====
+classifier_ignore_columns = Nuclei_Location.*, Meta.*,lbl*
+# ==== Other ====
+image_tile_size = 200
