@@ -1,6 +1,6 @@
 # install 
 
-* `git clone git@bitbucket.org:pgmsembryogenesis/embryo_counter.git`
+* `git clone https://wimthiels@bitbucket.org/pgmsembryogenesis/embryo_counter.git`
 * cd into embryo_counter
 * `pip install -r requirements.txt`
 
