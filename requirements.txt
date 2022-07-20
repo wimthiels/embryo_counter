@@ -1,9 +1,9 @@
+scikit-image==0.18.3
+scikit-learn
 numpy
 pandas
 pathlib
-pickle
 matplotlib
 tifffile
-skimage
 scipy
-logging
+seaborn

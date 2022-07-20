@@ -12,7 +12,7 @@ import copy
 from pathlib import Path
 import pickle
 import pdb
-pdb.set_trace()
+# pdb.set_trace()
 from embryo_counter import *
 import logging
 
