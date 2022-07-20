@@ -1,0 +1,10 @@
+python
+numpy
+pandas
+pathlib
+pickle
+matplotlib
+tifffile
+skimage
+scipy
+logging

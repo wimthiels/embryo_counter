@@ -6,7 +6,7 @@
 
 # one-time preparatory action
 change the root folder to your local drive in 
-*  embryo_counter_run.py
+* embryo_counter_run.py
 * cellprofiler.py
 * ./CellProfilerAnalyst/propertiesFile.txt
 
@@ -24,8 +24,8 @@ change the root folder to your local drive in
 # training via CellProfilerAnalyst
    
 ## installation and manual
-https://cellprofileranalyst.org/releases
-https://cellprofiler-manual.s3.amazonaws.com/CellProfiler-Analyst-3.0.2/index.html
+* https://cellprofileranalyst.org/releases
+* https://cellprofiler-manual.s3.amazonaws.com/CellProfiler-Analyst-3.0.2/index.html
 
 
 ## compose image.csv and objects.csv
